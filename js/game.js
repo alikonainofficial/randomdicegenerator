@@ -451,7 +451,9 @@
   }
 
   // ---------------------------------------------------------------- names
-  function editName(p) {
+  // fromPointer: started by a mouse/touch click. Then Enter/Escape hands focus back to the page so the
+  // next Space rolls; a keyboard-started edit returns focus to the name button instead.
+  function editName(p, fromPointer) {
     var btn = nameBtns[p];
     if (btn.hidden) return;
     var input = document.createElement('input');
@@ -480,13 +482,14 @@
       btn.hidden = false;
       renderAll();
     }
+    function refocus() { if (!fromPointer) btn.focus(); }
     input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); finish(true); btn.focus(); }
-      else if (e.key === 'Escape') { e.preventDefault(); finish(false); btn.focus(); }
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); refocus(); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); refocus(); }
     });
     input.addEventListener('blur', function () { finish(true); });
   }
-  nameBtns.forEach(function (b, p) { b.addEventListener('click', function () { editName(p); }); });
+  nameBtns.forEach(function (b, p) { b.addEventListener('click', function (e) { editName(p, e.detail > 0); }); });
 
   // ---------------------------------------------------------------- Settle-it options
   optInputs.forEach(function (inp, p) {
