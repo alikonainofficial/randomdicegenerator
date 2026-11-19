@@ -64,6 +64,7 @@
   display: block; width: var(--die); height: var(--die);
   transition: transform 60ms linear; will-change: transform;
   -webkit-user-drag: none; pointer-events: none;
+  filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.55));
 }
 
 /* landing bounce, then winner glow / loser shake */
@@ -140,6 +141,17 @@
 .bar-fill { width: 100%; max-width: 24px; min-height: 2px; background: var(--brass); border-radius: 3px 3px 0 0; transition: height 0.3s ease-out; }
 .bar-face { font: 13px/1.6 var(--pixel); color: var(--text); }
 .histogram figcaption { margin-top: 4px; font-size: 12px; color: var(--muted); text-align: center; }
+
+/* ---- reduced motion: no tumble (JS), no confetti, no bounce/pulse/shake; a dim "pending" state instead */
+@media (prefers-reduced-motion: reduce) {
+  .die img { transition: opacity 0.15s; }
+  .die.land img, .die.lose img { animation: none; }
+  .die.rolling img { opacity: 0.35; }
+  .die.win { animation: none; box-shadow: inset 0 0 0 2px var(--brass), 0 0 24px rgba(226, 187, 110, 0.5); }
+  .confetti { display: none; }
+  .bar-fill { transition: none; }
+  .roll { transition: none; }
+}
 
 @media (max-width: 560px) {
   .stats { grid-template-columns: 1fr; }

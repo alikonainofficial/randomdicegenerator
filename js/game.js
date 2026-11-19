@@ -149,7 +149,7 @@
     clearOutcome();
   }
 
-  function clearOutcome() { cols.forEach(function (c) { c.classList.remove('land', 'win', 'lose'); }); }
+  function clearOutcome() { cols.forEach(function (c) { c.classList.remove('land', 'win', 'lose', 'rolling'); }); }
 
   function renderSegs() {
     setPressed(segs.mode, state.mode);
@@ -263,6 +263,7 @@
     copyBtn.hidden = true;
     setVerdict('');
     clearOutcome();
+    cols.forEach(function (c) { c.classList.add('rolling'); });
 
     var result = [[], []];
     for (var p = 0; p < 2; p++) for (var i = 0; i < state.diceCount; i++) result[p].push(rollValue());
@@ -303,6 +304,7 @@
 
   function land(p, vals) {
     state.values[p] = vals.slice();
+    cols[p].classList.remove('rolling');
     var imgs = cols[p].children;
     for (var i = 0; i < imgs.length; i++) {
       imgs[i].src = faceSrc(vals[i]);
@@ -380,7 +382,7 @@
     setTimeout(function () {
       setBusy(false);
       A.sfx.play('win');
-      confetti();
+      if (!reducedMotion.matches) confetti();
       var lines = [];
       if (streak && streak.count >= 2) lines.push('🔥 ' + esc(name) + ' on a ' + streak.count + '-match streak');
       var settle = state.mode === 'settle';
@@ -590,6 +592,11 @@
   }
 
   // ---------------------------------------------------------------- start
+  var hint = app.querySelector('.hint');
+  hint.textContent = A.touch.isCoarse()
+    ? 'Tap Roll or the dice, or shake your phone · tap a name to rename'
+    : 'Space / Enter or click the dice to roll · click a name to rename';
+
   buildDice();
   renderAll();
 })();
