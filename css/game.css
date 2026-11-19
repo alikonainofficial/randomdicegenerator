@@ -1,0 +1,75 @@
+/* game.css — Dice Roller. Loaded before css/arcade-shell.css (the shell asks to come last). */
+
+.dice-app {
+  --pixel: "Pixelify Sans", "Silkscreen", "Courier New", monospace;
+  --brass: #e2bb6e; --brass-hi: #efd096; --coral: #ff7a59; --line: #2a5a63;
+  --surface: #163a42; --surface2: #1e4852; --muted: #b3c8c0; --text: #eef3ec;
+  --die: min(112px, 17vw);
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 18px 16px 22px; color: var(--text); touch-action: manipulation;
+}
+
+/* ---- players + board share a two-column grid so names sit over their dice */
+.players, .board { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; width: 100%; }
+.player { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
+.name {
+  max-width: 100%; background: transparent; border: 1px dashed transparent; border-radius: 8px;
+  color: var(--brass-hi); font: 22px/1.2 var(--pixel); padding: 4px 10px; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.name:hover, .name:focus-visible { border-color: var(--line); outline: none; }
+
+.board { cursor: pointer; }
+.die {
+  display: flex; flex-wrap: wrap; justify-content: center; align-content: center; gap: 12px;
+  min-height: calc(var(--die) + 32px); padding: 16px 8px; box-sizing: border-box;
+  border-radius: 12px; background: #0a1c1f; box-shadow: inset 0 0 0 1px var(--line);
+}
+.die img {
+  display: block; width: var(--die); height: var(--die);
+  transition: transform 60ms linear; will-change: transform;
+  -webkit-user-drag: none; pointer-events: none;
+}
+
+/* landing bounce, then winner glow / loser shake */
+.die.land img { animation: die-land 200ms ease-out; }
+@keyframes die-land { 0% { transform: scale(1.15); } 100% { transform: scale(1); } }
+
+.die.win { animation: win-glow 1.2s ease-in-out infinite; }
+@keyframes win-glow {
+  0%, 100% { box-shadow: inset 0 0 0 2px var(--brass), 0 0 18px rgba(226, 187, 110, 0.35); }
+  50% { box-shadow: inset 0 0 0 2px var(--brass-hi), 0 0 38px rgba(239, 208, 150, 0.7); }
+}
+.die.lose img { animation: lose-shake 320ms ease-in-out; opacity: 0.72; transition: opacity 0.3s; }
+@keyframes lose-shake {
+  0%, 100% { transform: translateX(0); } 20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(3px); }
+}
+
+/* ---- verdict + roll button */
+.verdict { min-height: 1.3em; font: clamp(22px, 4.5vw, 32px)/1.3 var(--pixel); color: var(--coral); text-align: center; }
+
+.actions { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; }
+.roll {
+  font: 28px/1 var(--pixel); letter-spacing: 0.06em; color: #1d1d1f; background: var(--coral);
+  border: 0; border-radius: 999px; padding: 16px 56px; cursor: pointer;
+  box-shadow: 0 5px 0 #a8492f; transition: transform 80ms, box-shadow 80ms, opacity 0.2s;
+}
+.roll:hover { filter: brightness(1.06); }
+.roll:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 2px 0 #a8492f; }
+.roll:disabled { opacity: 0.45; cursor: default; }
+
+.chip {
+  background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 999px;
+  padding: 6px 14px; font: inherit; font-size: 14px; cursor: pointer;
+}
+.chip:hover { border-color: var(--brass); }
+
+.hint { margin: 0; font-size: 13px; color: var(--muted); text-align: center; }
+
+@media (max-width: 560px) {
+  .dice-app { padding: 14px 8px 18px; }
+  .players, .board { gap: 8px; }
+  .name { font-size: 18px; }
+  .roll { padding: 14px 44px; }
+}
