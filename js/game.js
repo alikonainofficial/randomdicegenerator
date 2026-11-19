@@ -8,6 +8,7 @@
  *   streak  { name, count }        consecutive match wins by the same name
  *   best    number                 longest match-win streak
  *   plays   number                 matches completed
+ *   history [{ t, a: [4,3], b: [6,2], winner: 0|1|null }]   last 10 rolls, oldest first
  */
 (function () {
   'use strict';
@@ -24,7 +25,9 @@
   var SHAKE_THRESHOLD = 18;    // m/s²
   var SHAKE_DEBOUNCE = 1500;   // ms
   var NAME_MAX = 14;
+  var HISTORY_MAX = 10;
   var DEFAULT_NAMES = ['Player 1', 'Player 2'];
+  var DEFAULT_OPTIONS = ['Pizza', 'Sushi'];   // an empty Settle-it field reads as its placeholder
   var SERIES_LABEL = { 1: 'Single', 2: 'Best of 3', 3: 'Best of 5' };
   var CONFETTI_COLOURS = [A.theme.brass, A.theme.coral, A.theme.cyan, A.theme.magenta, A.theme.green, A.theme.yellow];
 
@@ -33,7 +36,12 @@
   // ---------------------------------------------------------------- state
   var state = {
     names: DEFAULT_NAMES.slice(),   // replaced from storage right after Arcade.init (the store is per game id)
+    mode: 'players',                // 'players' | 'settle'
+    options: ['', ''],              // Settle-it choices (not persisted: session only)
+    playersTarget: 1,               // series length to restore when leaving Settle it
     diceCount: 2,
+    history: [],
+    faceCounts: [0, 0, 0, 0, 0, 0], // every die landed this session, faces 1..6
     rolling: false,
     values: [[], []],          // last landed faces per player
     lastTotals: null           // totals of the last decisive roll, for the single-roll share line
@@ -48,6 +56,20 @@
     return n.map(function (s, i) { return typeof s === 'string' && s.trim() ? s.trim().slice(0, NAME_MAX) : DEFAULT_NAMES[i]; });
   }
 
+  function loadHistory() {
+    var h = A.store.get('history', []);
+    if (!Array.isArray(h)) return [];
+    return h.filter(function (r) {
+      return r && Array.isArray(r.a) && Array.isArray(r.b) && (r.winner === 0 || r.winner === 1 || r.winner === null);
+    }).slice(-HISTORY_MAX);
+  }
+
+  // What to call side p right now: a player's name, or a Settle-it option.
+  function label(p) {
+    if (state.mode === 'settle') return state.options[p].trim() || DEFAULT_OPTIONS[p];
+    return state.names[p];
+  }
+
   // ---------------------------------------------------------------- shell + DOM
   A.init({
     game: 'dice',
@@ -58,6 +80,7 @@
   });
 
   state.names = loadNames();
+  state.history = loadHistory();
 
   var app = document.getElementById('dice-app');
   var frame = document.querySelector('.arcade-frame');
@@ -68,6 +91,7 @@
   var cols = [board.querySelector('.die[data-p="0"]'), board.querySelector('.die[data-p="1"]')];
   var players = [app.querySelector('.player[data-p="0"]'), app.querySelector('.player[data-p="1"]')];
   var nameBtns = [app.querySelector('.name[data-p="0"]'), app.querySelector('.name[data-p="1"]')];
+  var optInputs = [app.querySelector('.opt-input[data-p="0"]'), app.querySelector('.opt-input[data-p="1"]')];
   var scoreEls = [app.querySelector('.score[data-p="0"]'), app.querySelector('.score[data-p="1"]')];
   var verdictEl = app.querySelector('.verdict');
   var calloutEl = app.querySelector('.callout');
@@ -75,7 +99,15 @@
   var rollBtn = document.getElementById('roll');
   var copyBtn = document.getElementById('copy');
   var shakeBtn = document.getElementById('shake');
-  var segs = { dice: app.querySelector('.seg[data-ctl="dice"]'), series: app.querySelector('.seg[data-ctl="series"]') };
+  var segs = {
+    mode: app.querySelector('.seg[data-ctl="mode"]'),
+    dice: app.querySelector('.seg[data-ctl="dice"]'),
+    series: app.querySelector('.seg[data-ctl="series"]')
+  };
+  var historyList = app.querySelector('.history-list');
+  var historyEmpty = app.querySelector('.history-empty');
+  var historyCount = app.querySelector('.history-count');
+  var barsEl = app.querySelector('.histogram .bars');
 
   // Preload the six faces so the tumble never flashes a blank image.
   for (var f = 1; f <= 6; f++) { new Image().src = faceSrc(f); }
@@ -94,8 +126,10 @@
 
   // ---------------------------------------------------------------- render
   function renderNames() {
-    nameBtns.forEach(function (b, p) { b.textContent = state.names[p]; });
-    cols.forEach(function (c, p) { c.setAttribute('aria-label', state.names[p] + ' dice'); });
+    var settle = state.mode === 'settle';
+    nameBtns.forEach(function (b, p) { b.textContent = state.names[p]; b.hidden = settle; });
+    optInputs.forEach(function (inp, p) { inp.hidden = !settle; if (inp.value !== state.options[p]) inp.value = state.options[p]; });
+    cols.forEach(function (c, p) { c.setAttribute('aria-label', label(p) + ' dice'); });
   }
 
   function buildDice() {
@@ -118,11 +152,12 @@
   function clearOutcome() { cols.forEach(function (c) { c.classList.remove('land', 'win', 'lose'); }); }
 
   function renderSegs() {
+    setPressed(segs.mode, state.mode);
     setPressed(segs.dice, state.diceCount);
     setPressed(segs.series, series.target);
   }
   function setPressed(seg, v) {
-    Array.prototype.forEach.call(seg.querySelectorAll('button'), function (b) { b.setAttribute('aria-pressed', String(+b.dataset.v === v)); });
+    Array.prototype.forEach.call(seg.querySelectorAll('button'), function (b) { b.setAttribute('aria-pressed', String(String(b.dataset.v) === String(v))); });
   }
 
   function renderScore() {
@@ -132,7 +167,7 @@
       var html = '';
       for (var i = 0; i < series.target; i++) html += '<span class="pip' + (i < series.wins[p] ? ' on' : '') + '">' + (i < series.wins[p] ? '●' : '○') + '</span>';
       el.innerHTML = html;
-      el.setAttribute('aria-label', state.names[p] + ': ' + series.wins[p] + ' of ' + series.target + ' rounds');
+      el.setAttribute('aria-label', label(p) + ': ' + series.wins[p] + ' of ' + series.target + ' rounds');
     });
   }
 
@@ -141,14 +176,14 @@
     var text = '';
     if (series.target > 1 && !series.over) {
       var on = [0, 1].filter(function (p) { return series.wins[p] === series.target - 1; });
-      if (on.length) text = 'Match point — ' + on.map(function (p) { return state.names[p]; }).join(' & ');
+      if (on.length) text = 'Match point — ' + on.map(label).join(' & ');
     }
     calloutEl.textContent = text;
   }
 
   function renderStreak() {
     var s = A.store.get('streak', null);
-    if (s && s.count >= 2 && state.names.indexOf(s.name) !== -1) {
+    if (state.mode === 'players' && s && s.count >= 2 && state.names.indexOf(s.name) !== -1) {
       streakEl.textContent = '🔥 ' + s.name + ' on a ' + s.count + '-match streak';
       streakEl.hidden = false;
     } else {
@@ -173,7 +208,44 @@
     Array.prototype.forEach.call(app.querySelectorAll('.seg button'), function (btn) { btn.disabled = b; });
   }
 
-  function renderAll() { renderNames(); renderSegs(); renderScore(); renderCallout(); renderStreak(); renderHud(); }
+  // History line: "Ali 4+3=7 · Sara 6+2=8 → Sara" (labels are whatever the sides are called now).
+  function historyLine(r) {
+    function side(p, vals) {
+      var total = sum(vals);
+      return label(p) + ' ' + (vals.length > 1 ? vals.join('+') + '=' + total : String(total));
+    }
+    return side(0, r.a) + ' · ' + side(1, r.b) + ' → ' + (r.winner === null ? 'draw' : label(r.winner));
+  }
+
+  function renderHistory() {
+    historyList.innerHTML = '';
+    for (var i = state.history.length - 1; i >= 0; i--) {   // newest first
+      var li = document.createElement('li');
+      li.textContent = historyLine(state.history[i]);
+      historyList.appendChild(li);
+    }
+    historyEmpty.hidden = state.history.length > 0;
+    historyCount.textContent = state.history.length ? '(' + state.history.length + ')' : '';
+  }
+
+  function renderHistogram() {
+    var max = Math.max.apply(null, state.faceCounts.concat([1]));
+    var html = '';
+    for (var f = 0; f < 6; f++) {
+      var n = state.faceCounts[f];
+      html += '<div class="bar" data-face="' + (f + 1) + '" title="' + (f + 1) + ': ' + n + '">' +
+        '<span class="bar-n">' + n + '</span>' +
+        '<span class="bar-fill" style="height:' + (n / max * 100).toFixed(1) + '%"></span>' +
+        '<span class="bar-face">' + (f + 1) + '</span></div>';
+    }
+    barsEl.innerHTML = html;
+    barsEl.setAttribute('aria-label', 'Faces rolled this session: ' + state.faceCounts.map(function (n, f) { return (f + 1) + ' × ' + n; }).join(', '));
+  }
+
+  function renderAll() {
+    renderNames(); renderSegs(); renderScore(); renderCallout(); renderStreak(); renderHud();
+    renderHistory(); renderHistogram();
+  }
 
   // ---------------------------------------------------------------- the roll
   function trigger() {
@@ -246,6 +318,7 @@
     var a = sum(result[0]), b = sum(result[1]);
     var winner = a > b ? 0 : b > a ? 1 : null;
     series.round++;
+    recordRoll(result, winner);
 
     if (winner === null) {
       // Tie: automatic roll-off. Stay busy so no other input sneaks in between.
@@ -262,13 +335,23 @@
     A.sfx.play('score');
 
     if (series.wins[winner] >= series.target) {
-      setVerdict('🚩 ' + state.names[winner] + ' wins!');
+      series.winner = winner;
+      setVerdict(state.mode === 'settle' ? settleLine() : '🚩 ' + label(winner) + ' wins!');
       matchWon(winner);
     } else {
-      setVerdict('🚩 ' + state.names[winner] + ' takes the round');
+      setVerdict('🚩 ' + label(winner) + ' takes the round');
       renderScore(); renderCallout(); renderHud();
       setBusy(false);
     }
+  }
+
+  function recordRoll(result, winner) {
+    state.history.push({ t: Date.now(), a: result[0].slice(), b: result[1].slice(), winner: winner });
+    if (state.history.length > HISTORY_MAX) state.history = state.history.slice(-HISTORY_MAX);
+    A.store.set('history', state.history);
+    result[0].concat(result[1]).forEach(function (v) { state.faceCounts[v - 1]++; });
+    renderHistory();
+    renderHistogram();
   }
 
   // ---------------------------------------------------------------- match end
@@ -277,11 +360,15 @@
     series.winner = w;
     A.store.bumpPlays();
 
-    var prev = A.store.get('streak', null);
-    var name = state.names[w];
-    var streak = prev && prev.name === name ? { name: name, count: (prev.count | 0) + 1 } : { name: name, count: 1 };
-    A.store.set('streak', streak);
-    A.store.best('best', streak.count);
+    // Streaks are about people, so only Players-mode matches count towards them.
+    var streak = null;
+    var name = label(w);
+    if (state.mode === 'players') {
+      var prev = A.store.get('streak', null);
+      streak = prev && prev.name === name ? { name: name, count: (prev.count | 0) + 1 } : { name: name, count: 1 };
+      A.store.set('streak', streak);
+      A.store.best('best', streak.count);
+    }
 
     renderScore(); renderCallout(); renderStreak(); renderHud();
     setBusy(false);
@@ -295,10 +382,11 @@
       A.sfx.play('win');
       confetti();
       var lines = [];
-      if (streak.count >= 2) lines.push('🔥 ' + esc(name) + ' on a ' + streak.count + '-match streak');
+      if (streak && streak.count >= 2) lines.push('🔥 ' + esc(name) + ' on a ' + streak.count + '-match streak');
+      var settle = state.mode === 'settle';
       A.ui.overlay({
-        kicker: SERIES_LABEL[series.target],
-        title: '🏆 ' + esc(name) + ' wins ' + series.wins[w] + '–' + series.wins[1 - w],
+        kicker: (settle ? 'Settled · ' : '') + SERIES_LABEL[series.target],
+        title: settle ? esc(settleLine()) : '🏆 ' + esc(name) + ' wins ' + series.wins[w] + '–' + series.wins[1 - w],
         lines: lines,
         buttons: [
           { label: 'Rematch', onClick: rematch },
@@ -320,9 +408,16 @@
     renderAll();
   }
 
+  // "🎲 Pizza beat Sushi 2–1"
+  function settleLine() {
+    var w = series.winner;
+    return '🎲 ' + label(w) + ' beat ' + label(1 - w) + ' ' + series.wins[w] + '–' + series.wins[1 - w];
+  }
+
   function shareText() {
-    var w = series.winner, n = state.names;
+    var w = series.winner, n = [label(0), label(1)];
     if (w === null) return '';
+    if (state.mode === 'settle') return settleLine();
     if (series.target === 1) {
       var t = state.lastTotals;
       return '🎲 ' + n[0] + ' ' + t[0] + ' vs ' + n[1] + ' ' + t[1];
@@ -391,16 +486,42 @@
   }
   nameBtns.forEach(function (b, p) { b.addEventListener('click', function () { editName(p); }); });
 
+  // ---------------------------------------------------------------- Settle-it options
+  optInputs.forEach(function (inp, p) {
+    inp.addEventListener('input', function () {
+      state.options[p] = inp.value.slice(0, NAME_MAX);
+      renderScore(); renderCallout(); renderHistory();
+      cols[p].setAttribute('aria-label', label(p) + ' dice');
+    });
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); inp.blur(); }
+    });
+  });
+
   // ---------------------------------------------------------------- controls
   function onSeg(seg, apply) {
     seg.addEventListener('click', function (e) {
       var b = e.target.closest('button');
       if (!b || state.rolling) return;
       if (e.detail) b.blur();
-      apply(+b.dataset.v);
+      apply(b.dataset.v);
     });
   }
+  onSeg(segs.mode, function (v) {
+    if (v === state.mode) return;
+    if (v === 'settle') {
+      state.playersTarget = series.target;
+      state.mode = 'settle';
+      series = newSeries(2);          // Settle it defaults to Best of 3
+    } else {
+      state.mode = 'players';
+      series = newSeries(state.playersTarget);
+    }
+    rematch();
+    if (state.mode === 'settle' && !state.options[0] && !state.options[1]) optInputs[0].focus();
+  });
   onSeg(segs.dice, function (v) {
+    v = +v;
     if (v === state.diceCount) return;
     state.diceCount = v;
     state.values = [[], []];
@@ -408,6 +529,7 @@
     rematch();
   });
   onSeg(segs.series, function (v) {
+    v = +v;
     if (v === series.target && !series.over) return;
     series = newSeries(v);
     rematch();

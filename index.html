@@ -13,6 +13,11 @@
     <canvas id="gameCanvas" width="800" height="600" style="display:none"></canvas>
 
     <main id="dice-app" class="dice-app">
+      <div class="seg seg-mode" role="group" aria-label="Mode" data-ctl="mode">
+        <button type="button" data-v="players">Players</button>
+        <button type="button" data-v="settle">Settle it</button>
+      </div>
+
       <div class="controls">
         <div class="seg" role="group" aria-label="Dice per player" data-ctl="dice">
           <span class="seg-label">Dice</span>
@@ -34,10 +39,12 @@
       <div class="players">
         <div class="player" data-p="0">
           <button type="button" class="name" data-p="0" title="Click to rename">Player 1</button>
+          <input type="text" class="opt-input" data-p="0" maxlength="14" placeholder="Pizza" aria-label="Option 1" autocomplete="off" hidden>
           <div class="score" data-p="0" aria-label="Rounds won"></div>
         </div>
         <div class="player" data-p="1">
           <button type="button" class="name" data-p="1" title="Click to rename">Player 2</button>
+          <input type="text" class="opt-input" data-p="1" maxlength="14" placeholder="Sushi" aria-label="Option 2" autocomplete="off" hidden>
           <div class="score" data-p="1" aria-label="Rounds won"></div>
         </div>
       </div>
@@ -57,6 +64,18 @@
         <button type="button" id="shake" class="chip shake-btn" hidden>Enable shake</button>
       </div>
       <p class="hint">Space / Enter, tap the dice, or shake your phone · click a name to rename</p>
+
+      <section class="stats">
+        <details class="history">
+          <summary>History <span class="history-count"></span></summary>
+          <ol class="history-list"></ol>
+          <p class="history-empty">No rolls yet.</p>
+        </details>
+        <figure class="histogram">
+          <div class="bars" role="img" aria-label="Count of each face rolled this session"></div>
+          <figcaption>Fair dice: counts for this session</figcaption>
+        </figure>
+      </section>
     </main>
 
     <script src="js/arcade-shell.js"></script>
