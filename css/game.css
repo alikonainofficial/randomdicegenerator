@@ -9,6 +9,25 @@
   padding: 18px 16px 22px; color: var(--text); touch-action: manipulation;
 }
 
+/* ---- controls: segmented buttons */
+.controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 22px; }
+.seg { display: inline-flex; align-items: center; gap: 0; }
+.seg-label { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-right: 8px; }
+.seg button {
+  background: var(--surface); color: var(--text); border: 1px solid var(--line); margin-left: -1px;
+  padding: 6px 12px; font: inherit; font-size: 14px; cursor: pointer; min-width: 36px;
+}
+.seg button:first-of-type { border-radius: 999px 0 0 999px; margin-left: 0; }
+.seg button:last-of-type { border-radius: 0 999px 999px 0; }
+.seg button:hover:not(:disabled) { background: var(--surface2); }
+.seg button[aria-pressed="true"] { background: var(--brass); border-color: var(--brass); color: #1d1d1f; position: relative; }
+.seg button:disabled { cursor: default; opacity: 0.6; }
+.seg button:focus-visible { outline: 2px solid var(--brass-hi); outline-offset: 2px; position: relative; z-index: 1; }
+
+.streak { font-size: 15px; color: var(--brass-hi); }
+.callout { min-height: 1.2em; font: 16px/1.2 var(--pixel); color: var(--coral); letter-spacing: 0.04em; text-align: center; }
+.callout:empty { min-height: 0; margin: -7px 0; }
+
 /* ---- players + board share a two-column grid so names sit over their dice */
 .players, .board { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; width: 100%; }
 .player { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
@@ -18,8 +37,20 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .name:hover, .name:focus-visible { border-color: var(--line); outline: none; }
+.name-input {
+  width: 12ch; max-width: 100%; box-sizing: border-box; text-align: center; font: 22px/1.2 var(--pixel);
+  color: var(--text); background: #0a1c1f; border: 1px solid var(--brass); border-radius: 8px; padding: 4px 8px;
+  -webkit-user-select: text; user-select: text; outline: none;
+}
+.score { display: flex; gap: 6px; font-size: 16px; line-height: 1; color: var(--line); min-height: 16px; }
+.score .pip.on { color: var(--brass); }
 
 .board { cursor: pointer; }
+.board[data-count="1"] { --die: min(140px, 28vw); }
+.board[data-count="3"] { --die: min(96px, 11vw); }
+.board[data-count="5"] { --die: min(76px, 11vw); }
+.board[data-count="3"] .die, .board[data-count="5"] .die { gap: 8px; }
+.is-rolling .board { cursor: progress; }
 .die {
   display: flex; flex-wrap: wrap; justify-content: center; align-content: center; gap: 12px;
   min-height: calc(var(--die) + 32px); padding: 16px 8px; box-sizing: border-box;
@@ -46,6 +77,22 @@
   40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(3px); }
 }
 
+/* The game root is appended to the frame after the shell's overlay, and the dice create their own
+   stacking contexts (transform/animation), so lift the overlay explicitly. Confetti sits above it. */
+.arcade-frame > .arcade-overlay { z-index: 4; }
+
+/* ---- confetti (DOM squares, launched upward inside the frame) */
+.confetti { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: 12px; z-index: 5; }
+.confetti i {
+  position: absolute; top: 62%; width: 6px; height: 6px; opacity: 0;
+  animation: confetti-burst 1.1s cubic-bezier(0.15, 0.7, 0.35, 1) forwards;
+}
+@keyframes confetti-burst {
+  0% { opacity: 1; transform: translate(0, 0) rotate(0deg); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)); }
+}
+
 /* ---- verdict + roll button */
 .verdict { min-height: 1.3em; font: clamp(22px, 4.5vw, 32px)/1.3 var(--pixel); color: var(--coral); text-align: center; }
 
@@ -70,6 +117,8 @@
 @media (max-width: 560px) {
   .dice-app { padding: 14px 8px 18px; }
   .players, .board { gap: 8px; }
-  .name { font-size: 18px; }
+  .name, .name-input { font-size: 18px; }
+  .controls { gap: 8px 14px; }
+  .seg button { padding: 6px 9px; font-size: 13px; }
   .roll { padding: 14px 44px; }
 }

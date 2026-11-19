@@ -13,14 +13,36 @@
     <canvas id="gameCanvas" width="800" height="600" style="display:none"></canvas>
 
     <main id="dice-app" class="dice-app">
-      <div class="players">
-        <div class="player" data-p="0">
-          <button type="button" class="name" data-p="0">Player 1</button>
+      <div class="controls">
+        <div class="seg" role="group" aria-label="Dice per player" data-ctl="dice">
+          <span class="seg-label">Dice</span>
+          <button type="button" data-v="1">1</button>
+          <button type="button" data-v="2">2</button>
+          <button type="button" data-v="3">3</button>
+          <button type="button" data-v="5">5</button>
         </div>
-        <div class="player" data-p="1">
-          <button type="button" class="name" data-p="1">Player 2</button>
+        <div class="seg" role="group" aria-label="Series length" data-ctl="series">
+          <span class="seg-label">Series</span>
+          <button type="button" data-v="1">Single</button>
+          <button type="button" data-v="2">Best of 3</button>
+          <button type="button" data-v="3">Best of 5</button>
         </div>
       </div>
+
+      <div class="streak" hidden></div>
+
+      <div class="players">
+        <div class="player" data-p="0">
+          <button type="button" class="name" data-p="0" title="Click to rename">Player 1</button>
+          <div class="score" data-p="0" aria-label="Rounds won"></div>
+        </div>
+        <div class="player" data-p="1">
+          <button type="button" class="name" data-p="1" title="Click to rename">Player 2</button>
+          <div class="score" data-p="1" aria-label="Rounds won"></div>
+        </div>
+      </div>
+
+      <div class="callout" aria-live="polite"></div>
 
       <div class="board" id="board" title="Tap to roll">
         <div class="die" data-p="0" aria-label="Player 1 dice"></div>
@@ -31,9 +53,10 @@
 
       <div class="actions">
         <button type="button" id="roll" class="roll">Roll</button>
+        <button type="button" id="copy" class="chip" hidden>Copy result</button>
         <button type="button" id="shake" class="chip shake-btn" hidden>Enable shake</button>
       </div>
-      <p class="hint">Space / Enter, tap the dice, or shake your phone</p>
+      <p class="hint">Space / Enter, tap the dice, or shake your phone · click a name to rename</p>
     </main>
 
     <script src="js/arcade-shell.js"></script>

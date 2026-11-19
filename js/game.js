@@ -2,6 +2,12 @@
  * game.js — Dice Roller for the alikonainofficial arcade.
  * A DOM game on top of js/arcade-shell.js (loaded first): the shell supplies the stage chrome,
  * store, sfx, share, rng, overlay and toast; the dice themselves are plain <img> elements.
+ *
+ * Storage (via Arcade.store, so every key is prefixed "arcade.dice."):
+ *   names   ['Player 1', 'Player 2']
+ *   streak  { name, count }        consecutive match wins by the same name
+ *   best    number                 longest match-win streak
+ *   plays   number                 matches completed
  */
 (function () {
   'use strict';
@@ -12,28 +18,46 @@
   var FACE_MS = 60;            // a tumbling die shows a new face this often
   var LAND_MS = [750, 1000];   // Player 1 lands at 750 ms, Player 2 at 1,000 ms
   var VERDICT_DELAY = 200;     // verdict follows the last landing bounce
+  var ROLLOFF_DELAY = 600;     // a tie re-rolls by itself after this long
+  var BANNER_DELAY = 650;      // let the deciding round's glow show before the match banner
   var WOBBLE_DEG = 28;         // starting wobble, eases out to 0 at landing
   var SHAKE_THRESHOLD = 18;    // m/s²
   var SHAKE_DEBOUNCE = 1500;   // ms
+  var NAME_MAX = 14;
+  var DEFAULT_NAMES = ['Player 1', 'Player 2'];
+  var SERIES_LABEL = { 1: 'Single', 2: 'Best of 3', 3: 'Best of 5' };
+  var CONFETTI_COLOURS = [A.theme.brass, A.theme.coral, A.theme.cyan, A.theme.magenta, A.theme.green, A.theme.yellow];
 
   var reducedMotion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
 
   // ---------------------------------------------------------------- state
   var state = {
-    names: ['Player 1', 'Player 2'],
+    names: DEFAULT_NAMES.slice(),   // replaced from storage right after Arcade.init (the store is per game id)
     diceCount: 2,
     rolling: false,
-    values: [[], []]           // last landed faces per player
+    values: [[], []],          // last landed faces per player
+    lastTotals: null           // totals of the last decisive roll, for the single-roll share line
   };
+  var series = newSeries(1);
+
+  function newSeries(target) { return { target: target, wins: [0, 0], round: 0, over: false, winner: null }; }
+
+  function loadNames() {
+    var n = A.store.get('names', null);
+    if (!Array.isArray(n) || n.length !== 2) return DEFAULT_NAMES.slice();
+    return n.map(function (s, i) { return typeof s === 'string' && s.trim() ? s.trim().slice(0, NAME_MAX) : DEFAULT_NAMES[i]; });
+  }
 
   // ---------------------------------------------------------------- shell + DOM
   A.init({
     game: 'dice',
     title: 'Dice Roller',
-    onRestart: function () { /* R key: nothing to restart yet */ },
+    onRestart: function () { if (!state.rolling) rematch(); },   // R key
     // The shell's P/Escape pause overlay has no meaning for a dice roll: undo it at once.
     onPauseChange: function (paused) { if (paused) A.pause(false); }
   });
+
+  state.names = loadNames();
 
   var app = document.getElementById('dice-app');
   var frame = document.querySelector('.arcade-frame');
@@ -42,10 +66,16 @@
 
   var board = document.getElementById('board');
   var cols = [board.querySelector('.die[data-p="0"]'), board.querySelector('.die[data-p="1"]')];
+  var players = [app.querySelector('.player[data-p="0"]'), app.querySelector('.player[data-p="1"]')];
   var nameBtns = [app.querySelector('.name[data-p="0"]'), app.querySelector('.name[data-p="1"]')];
+  var scoreEls = [app.querySelector('.score[data-p="0"]'), app.querySelector('.score[data-p="1"]')];
   var verdictEl = app.querySelector('.verdict');
+  var calloutEl = app.querySelector('.callout');
+  var streakEl = app.querySelector('.streak');
   var rollBtn = document.getElementById('roll');
+  var copyBtn = document.getElementById('copy');
   var shakeBtn = document.getElementById('shake');
+  var segs = { dice: app.querySelector('.seg[data-ctl="dice"]'), series: app.querySelector('.seg[data-ctl="series"]') };
 
   // Preload the six faces so the tumble never flashes a blank image.
   for (var f = 1; f <= 6; f++) { new Image().src = faceSrc(f); }
@@ -55,6 +85,7 @@
   function rollValue() { return A.rng.secureInt(6) + 1; }
   function sum(arr) { return arr.reduce(function (s, v) { return s + v; }, 0); }
   function restartAnim(elm, cls) { elm.classList.remove(cls); void elm.offsetWidth; elm.classList.add(cls); }
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 
   function wakeAudio() {
     var c = A.sfx.context();
@@ -68,6 +99,7 @@
   }
 
   function buildDice() {
+    board.setAttribute('data-count', state.diceCount);
     cols.forEach(function (col, p) {
       col.innerHTML = '';
       var vals = state.values[p];
@@ -79,24 +111,86 @@
         img.draggable = false;
         col.appendChild(img);
       }
-      col.classList.remove('land', 'win', 'lose');
     });
+    clearOutcome();
+  }
+
+  function clearOutcome() { cols.forEach(function (c) { c.classList.remove('land', 'win', 'lose'); }); }
+
+  function renderSegs() {
+    setPressed(segs.dice, state.diceCount);
+    setPressed(segs.series, series.target);
+  }
+  function setPressed(seg, v) {
+    Array.prototype.forEach.call(seg.querySelectorAll('button'), function (b) { b.setAttribute('aria-pressed', String(+b.dataset.v === v)); });
+  }
+
+  function renderScore() {
+    scoreEls.forEach(function (el, p) {
+      if (series.target === 1) { el.innerHTML = ''; el.hidden = true; return; }
+      el.hidden = false;
+      var html = '';
+      for (var i = 0; i < series.target; i++) html += '<span class="pip' + (i < series.wins[p] ? ' on' : '') + '">' + (i < series.wins[p] ? '●' : '○') + '</span>';
+      el.innerHTML = html;
+      el.setAttribute('aria-label', state.names[p] + ': ' + series.wins[p] + ' of ' + series.target + ' rounds');
+    });
+  }
+
+  // "Match point — Ali" when a player is one win away (best-of series only), shown before the roll.
+  function renderCallout() {
+    var text = '';
+    if (series.target > 1 && !series.over) {
+      var on = [0, 1].filter(function (p) { return series.wins[p] === series.target - 1; });
+      if (on.length) text = 'Match point — ' + on.map(function (p) { return state.names[p]; }).join(' & ');
+    }
+    calloutEl.textContent = text;
+  }
+
+  function renderStreak() {
+    var s = A.store.get('streak', null);
+    if (s && s.count >= 2 && state.names.indexOf(s.name) !== -1) {
+      streakEl.textContent = '🔥 ' + s.name + ' on a ' + s.count + '-match streak';
+      streakEl.hidden = false;
+    } else {
+      streakEl.hidden = true;
+    }
+  }
+
+  function renderHud() {
+    var items = {};
+    if (series.target > 1) items.Round = series.over ? '—' : String(series.wins[0] + series.wins[1] + 1);
+    items.Matches = String(A.store.get('plays', 0) | 0);
+    items['Best streak'] = String(A.store.get('best', 0) | 0);
+    A.ui.hud(items);
   }
 
   function setVerdict(text) { verdictEl.textContent = text; }
 
+  function setBusy(b) {
+    state.rolling = b;
+    rollBtn.disabled = b;
+    app.classList.toggle('is-rolling', b);
+    Array.prototype.forEach.call(app.querySelectorAll('.seg button'), function (btn) { btn.disabled = b; });
+  }
+
+  function renderAll() { renderNames(); renderSegs(); renderScore(); renderCallout(); renderStreak(); renderHud(); }
+
   // ---------------------------------------------------------------- the roll
   function trigger() {
     if (state.rolling) return;
+    if (series.over) {               // a finished match: the next roll starts a fresh one
+      if (A.ui.overlayVisible()) A.ui.hideOverlay();
+      rematch();
+    }
     roll();
   }
 
   function roll() {
-    state.rolling = true;
+    setBusy(true);
     wakeAudio();
-    rollBtn.disabled = true;
+    copyBtn.hidden = true;
     setVerdict('');
-    cols.forEach(function (c) { c.classList.remove('land', 'win', 'lose'); });
+    clearOutcome();
 
     var result = [[], []];
     for (var p = 0; p < 2; p++) for (var i = 0; i < state.diceCount; i++) result[p].push(rollValue());
@@ -151,24 +245,180 @@
   function resolve(result) {
     var a = sum(result[0]), b = sum(result[1]);
     var winner = a > b ? 0 : b > a ? 1 : null;
+    series.round++;
+
     if (winner === null) {
-      setVerdict("It's a draw");
+      // Tie: automatic roll-off. Stay busy so no other input sneaks in between.
+      setVerdict('Tie — rolling off…');
       A.sfx.play('tick');
-    } else {
-      cols[winner].classList.add('win');
-      cols[1 - winner].classList.add('lose');
-      setVerdict('🚩 ' + state.names[winner] + ' wins!');
-      A.sfx.play('score');
+      setTimeout(roll, ROLLOFF_DELAY);
+      return;
     }
-    state.rolling = false;
-    rollBtn.disabled = false;
+
+    state.lastTotals = [a, b];
+    cols[winner].classList.add('win');
+    cols[1 - winner].classList.add('lose');
+    series.wins[winner]++;
+    A.sfx.play('score');
+
+    if (series.wins[winner] >= series.target) {
+      setVerdict('🚩 ' + state.names[winner] + ' wins!');
+      matchWon(winner);
+    } else {
+      setVerdict('🚩 ' + state.names[winner] + ' takes the round');
+      renderScore(); renderCallout(); renderHud();
+      setBusy(false);
+    }
   }
+
+  // ---------------------------------------------------------------- match end
+  function matchWon(w) {
+    series.over = true;
+    series.winner = w;
+    A.store.bumpPlays();
+
+    var prev = A.store.get('streak', null);
+    var name = state.names[w];
+    var streak = prev && prev.name === name ? { name: name, count: (prev.count | 0) + 1 } : { name: name, count: 1 };
+    A.store.set('streak', streak);
+    A.store.best('best', streak.count);
+
+    renderScore(); renderCallout(); renderStreak(); renderHud();
+    setBusy(false);
+    copyBtn.hidden = false;
+
+    if (series.target === 1) return; // a single roll: the verdict line is the whole ceremony
+
+    setBusy(true); // hold input until the banner is up
+    setTimeout(function () {
+      setBusy(false);
+      A.sfx.play('win');
+      confetti();
+      var lines = [];
+      if (streak.count >= 2) lines.push('🔥 ' + esc(name) + ' on a ' + streak.count + '-match streak');
+      A.ui.overlay({
+        kicker: SERIES_LABEL[series.target],
+        title: '🏆 ' + esc(name) + ' wins ' + series.wins[w] + '–' + series.wins[1 - w],
+        lines: lines,
+        buttons: [
+          { label: 'Rematch', onClick: rematch },
+          { label: 'Copy result', onClick: copyResult, keepOpen: true }
+        ],
+        hint: 'Space or tap for a rematch',
+        action: rematch
+      });
+    }, BANNER_DELAY);
+  }
+
+  function rematch() {
+    if (A.ui.overlayVisible()) A.ui.hideOverlay();
+    series = newSeries(series.target);
+    state.lastTotals = null;
+    copyBtn.hidden = true;
+    setVerdict('');
+    clearOutcome();
+    renderAll();
+  }
+
+  function shareText() {
+    var w = series.winner, n = state.names;
+    if (w === null) return '';
+    if (series.target === 1) {
+      var t = state.lastTotals;
+      return '🎲 ' + n[0] + ' ' + t[0] + ' vs ' + n[1] + ' ' + t[1];
+    }
+    return '🎲 ' + n[w] + ' beat ' + n[1 - w] + ' ' + series.wins[w] + '–' + series.wins[1 - w] +
+      ' (best of ' + (series.target * 2 - 1) + ')';
+  }
+
+  function copyResult() { var s = shareText(); if (s) A.share.copy(s, 'Result copied'); }
+
+  // DOM confetti: 40 small squares burst upward from the middle of the frame, gone after 1.2 s.
+  function confetti() {
+    var box = document.createElement('div');
+    box.className = 'confetti';
+    for (var i = 0; i < 40; i++) {
+      var c = document.createElement('i');
+      var dx = (Math.random() * 2 - 1) * 260;
+      var dy = -(140 + Math.random() * 260);
+      c.style.left = (40 + Math.random() * 20) + '%';
+      c.style.background = CONFETTI_COLOURS[i % CONFETTI_COLOURS.length];
+      c.style.setProperty('--dx', dx.toFixed(0) + 'px');
+      c.style.setProperty('--dy', dy.toFixed(0) + 'px');
+      c.style.setProperty('--rot', (Math.random() * 720 - 360).toFixed(0) + 'deg');
+      c.style.animationDelay = (Math.random() * 120).toFixed(0) + 'ms';
+      box.appendChild(c);
+    }
+    frame.appendChild(box);
+    setTimeout(function () { if (box.parentNode) box.parentNode.removeChild(box); }, 1200);
+  }
+
+  // ---------------------------------------------------------------- names
+  function editName(p) {
+    var btn = nameBtns[p];
+    if (btn.hidden) return;
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'name-input';
+    input.maxLength = NAME_MAX;
+    input.value = state.names[p];
+    input.setAttribute('aria-label', 'Name for player ' + (p + 1));
+    btn.hidden = true;
+    btn.parentNode.insertBefore(input, btn);
+    input.focus();
+    input.select();
+
+    var done = false;
+    function finish(save) {
+      if (done) return;
+      done = true;
+      if (save) {
+        var v = input.value.trim().slice(0, NAME_MAX);
+        if (v) {
+          state.names[p] = v;
+          A.store.set('names', state.names.slice());
+        }
+      }
+      input.parentNode.removeChild(input);
+      btn.hidden = false;
+      renderAll();
+    }
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); btn.focus(); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); btn.focus(); }
+    });
+    input.addEventListener('blur', function () { finish(true); });
+  }
+  nameBtns.forEach(function (b, p) { b.addEventListener('click', function () { editName(p); }); });
+
+  // ---------------------------------------------------------------- controls
+  function onSeg(seg, apply) {
+    seg.addEventListener('click', function (e) {
+      var b = e.target.closest('button');
+      if (!b || state.rolling) return;
+      if (e.detail) b.blur();
+      apply(+b.dataset.v);
+    });
+  }
+  onSeg(segs.dice, function (v) {
+    if (v === state.diceCount) return;
+    state.diceCount = v;
+    state.values = [[], []];
+    buildDice();
+    rematch();
+  });
+  onSeg(segs.series, function (v) {
+    if (v === series.target && !series.over) return;
+    series = newSeries(v);
+    rematch();
+  });
 
   // ---------------------------------------------------------------- input
   rollBtn.addEventListener('click', function (e) {
     if (e.detail) rollBtn.blur(); // mouse/touch click: keep Space free for the next roll
     trigger();
   });
+  copyBtn.addEventListener('click', function (e) { if (e.detail) copyBtn.blur(); copyResult(); });
 
   board.addEventListener('click', function () { trigger(); });
 
@@ -218,6 +468,6 @@
   }
 
   // ---------------------------------------------------------------- start
-  renderNames();
   buildDice();
+  renderAll();
 })();
